@@ -96,6 +96,7 @@ FSDB.prototype.ls = function(collectionName, opts, cb) {
     var q = queue();
 
     for (var i in ids) (function(id) {
+      if (/^\./.test(id)) return;
       var model = new self.collections[collectionName]({ id: id });
       models.push(model);
       q.push(model.read.bind(model, { cache: cache }));
@@ -359,7 +360,7 @@ function eachField(cache, fn, cb) {
             if (err.code === 'EISDIR') {
               return fs.readdir(dir + '/' + name, function(err, value) {
                 if (err) return cb(err);
-                fn(name, field, value, cb);
+                fn(name, field, value.filter(function(id) { return /^[^.]/.test(id) }), cb);
               });
             }
           }
