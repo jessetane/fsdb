@@ -393,11 +393,11 @@ function updateAssociations(field, collection, ids, disassociate, cb) {
   for (var i in ids) (function(id) {
     var links = [
       {
-        src: root + '/' + self.constructor.collection + '/' + self.id,
+        src: '../../../' + self.constructor.collection + '/' + self.id,
         dest: root + '/' + collection + '/' + id + '/' + alias + '/' + self.id,
         dir: root + '/' + collection + '/' + id + '/' + alias,
       }, {
-        src: root + '/' + collection + '/' + id,
+        src: '../../../' + collection + '/' + id,
         dest: root + '/' + self.constructor.collection + '/' + self.id + '/' + field + '/' + id,
         dir: root + '/' + self.constructor.collection + '/' + self.id + '/' + field,
       }
