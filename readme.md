@@ -119,7 +119,6 @@ running simple benchmark with 10000 ops
 #### Relationships
 Are only, and always(!) symetrical many-to-many relationships. Just some ideas here:
  * Why many-to-many? Everything is cool when you start out building your db and thinking object x will only ever have 1 y, but inevitably you end up pluralizing almost every relationship - so maybe just start out this way?
- * Why symetrical? Say you have collection x and collection y, where objects in x reference objects in y in a single direction - now if you delete an object from y, some of your x objects may be left with dangling references. By enforcing bidirectional relationships you have a fast way of either warning whoever is doing the y deletion about existing refs or at least cleaning up nicely after them. Obviously your app still needs to be dangle-proof cos transactions, what are thos?
 
 #### Misc
  * Field types aren't really a thing at this point - data is either text or a relationship
