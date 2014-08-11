@@ -364,9 +364,6 @@ function eachField(cache, fn, cb) {
               });
             }
           }
-          else {
-            value = value.trim();
-          }
           fn(name, field, value, cb);
         });
       });
