@@ -1,5 +1,5 @@
 # fsdb
-Create human-friendly databases using files, directories and symlinks.
+Human-friendly databases made with files, directories and symlinks.
 
 ## Why
 A database backed by filesystem primitives is not very efficient and has no sorting capabilities; it is generally "fast enough" for small datasets though and rather convenient as you can browse and edit from your shell or explorer gui!

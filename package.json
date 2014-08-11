@@ -1,5 +1,7 @@
 {
   "name": "fs-model",
+  "version": "1.0.0",
+  "description": "",
   "dependencies": {
     "deep-equal": "^0.2.1",
     "inherits": "^2.0.1",
@@ -14,5 +16,8 @@
   "scripts": {
     "test": "node test",
     "example": "node example/complex"
-  }
+  },
+  "repository": "https://github.com/jessetane/fsdb",
+  "author": "Jesse Tane <jesse.tane@gmail.com>",
+  "license": "WTFPL"
 }
