@@ -85,7 +85,7 @@ db/
 ```
 
 ## Tests
-There are some simple tests written with [tape](https://github.com/substack/tape). You can browse them [here](https://github.com/fsdb/test), and run them with:
+There are some simple tests written with [tape](https://github.com/substack/tape). You can browse them [here](https://github.com/jessetane/fsdb/tree/master/test), and run them with:
 ``` bash
 $ npm test
 ```
@@ -128,7 +128,7 @@ Are only, and always(!) symetrical many-to-many relationships. Just some ideas h
 
 ## Releases
 An abbreviated changelog and release tarballs below:
-* [1.0.0](https://github.com/jessetane/fsdb/releases)
+* [1.0.0](https://github.com/jessetane/fsdb/releases/tag/1.0.0)
  * August 10 2014, an experimental prototype
 
 ## License
