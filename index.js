@@ -43,13 +43,6 @@ FSDB.prototype.collect = function(collectionName, Model) {
     Model.fields = fields;
   }
 
-  for (var name in Model.fields) {
-    var field = Model.fields[name];
-    if (field === 'order') {
-      Model.order = name;
-    }
-  }
-
   Model.aliases = {};
   Model.database = this;
   Model.collection = collectionName;
@@ -91,7 +84,7 @@ FSDB.prototype.discard = function(collectionName) {
 FSDB.prototype.ls = function(collectionName, opts, cb) {
   if (typeof opts === 'function') {
     cb = opts;
-    opts = null;
+    opts = {};
   }
 
   var self = this;
@@ -101,25 +94,33 @@ FSDB.prototype.ls = function(collectionName, opts, cb) {
     if (err) return cb(err);
 
     var models = [];
-    var cache = {};
     var q = queue();
+    opts.cache = {};
 
     for (var i in ids) (function(id) {
-      if (/^\./.test(id)) return;
+      if (/^\./.test(id)) return; // ignore hidden files
       var model = new Model({ id: id });
       models.push(model);
-      q.push(model.read.bind(model, { cache: cache }));
+      q.push(model.read.bind(model, opts));
     })(ids[i]);
     
     q.start(function(err) {
       if (err) return cb(err);
 
-      var order = Model.order;
+      // ordering
+      var order = opts.order;
       if (order) {
         models.sort(function(a, b) {
           if (a[order] === b[order]) return 0;
           return a[order] > b[order] ? 1 : -1;
         });
+      }
+
+      // limiting / paging
+      var limit = opts.limit;
+      var page = opts.page || 1;
+      if (limit) {
+        models = models.slice(page * limit, limit);
       }
 
       models.collection = collectionName;
@@ -130,20 +131,20 @@ FSDB.prototype.ls = function(collectionName, opts, cb) {
   return this;
 };
 
-FSDB.prototype.read = function(collectionName, model, cb) {
+FSDB.prototype.read = function(collectionName, model, opts, cb) {
   model = new this.collections[collectionName](model);
-  return model.read(cb);
+  return model.read(opts, cb);
 };
 
 FSDB.prototype.create = 
-FSDB.prototype.update = function(collectionName, model, cb) {
+FSDB.prototype.update = function(collectionName, model, opts, cb) {
   model = new this.collections[collectionName](model);
-  return model.update(cb);
+  return model.update(opts, cb);
 };
 
-FSDB.prototype.destroy = function(collectionName, model, cb) {
+FSDB.prototype.destroy = function(collectionName, model, opts, cb) {
   model = new this.collections[collectionName](model);
-  return model.destroy(cb);
+  return model.destroy(opts, cb);
 };
 
 function FSDBModel(props) {
