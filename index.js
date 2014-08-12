@@ -7,8 +7,8 @@ var rimraf = require('rimraf');
 var inherits = require('inherits');
 var EventEmitter = require('events').EventEmitter;
 
-module.exports = FSDB;
 FSDB.Model = FSDBModel;
+module.exports = FSDB;
 
 function FSDB(opts) {
   if (!(this instanceof FSDB))
@@ -27,36 +27,43 @@ function FSDB(opts) {
   }
 }
 
-FSDB.prototype.collect = function(collectionName, modelDefinition) {
+FSDB.prototype.collect = function(collectionName, Model) {
   if (this.collections[collectionName]) {
     throw new Error('collection ' + collectionName + ' exists');
   }
 
-  if (typeof modelDefinition !== 'function') {
-    var fields = modelDefinition;
-    modelDefinition = function FSDBModelExtension(props) {
+  if (typeof Model !== 'function') {
+    var fields = Model;
+    Model = function FSDBModelExtension(props) {
       if (!(this instanceof FSDBModelExtension))
         return new FSDBModelExtension(props);
       FSDBModel.call(this, props);
     };
-    inherits(modelDefinition, FSDBModel);
-    modelDefinition.fields = fields;
+    inherits(Model, FSDBModel);
+    Model.fields = fields;
   }
 
-  modelDefinition.aliases = {};
-  modelDefinition.database = this;
-  modelDefinition.collection = collectionName;
-  modelDefinition.create = function(model, cb) {
+  for (var name in Model.fields) {
+    var field = Model.fields[name];
+    if (field === 'order') {
+      Model.order = name;
+    }
+  }
+
+  Model.aliases = {};
+  Model.database = this;
+  Model.collection = collectionName;
+  Model.create = function(model, cb) {
     return this.database.create(this.collection, model, cb);
   };
-  modelDefinition.ls = function(cb) {
+  Model.ls = function(cb) {
     return this.database.ls(this.collection, cb);
   };
   
-  this.collections[collectionName] = modelDefinition;
+  this.collections[collectionName] = Model;
   updateRelationships.call(this);
 
-  return modelDefinition;
+  return Model;
 };
 
 FSDB.prototype.discard = function(collectionName) {
@@ -88,6 +95,8 @@ FSDB.prototype.ls = function(collectionName, opts, cb) {
   }
 
   var self = this;
+  var Model = self.collections[collectionName];
+
   fs.readdir(mkroot(this.root) + '/' + collectionName, function(err, ids) {
     if (err) return cb(err);
 
@@ -97,13 +106,22 @@ FSDB.prototype.ls = function(collectionName, opts, cb) {
 
     for (var i in ids) (function(id) {
       if (/^\./.test(id)) return;
-      var model = new self.collections[collectionName]({ id: id });
+      var model = new Model({ id: id });
       models.push(model);
       q.push(model.read.bind(model, { cache: cache }));
     })(ids[i]);
     
     q.start(function(err) {
       if (err) return cb(err);
+
+      var order = Model.order;
+      if (order) {
+        models.sort(function(a, b) {
+          if (a[order] === b[order]) return 0;
+          return a[order] > b[order] ? 1 : -1;
+        });
+      }
+
       models.collection = collectionName;
       cb(null, models);
     });
