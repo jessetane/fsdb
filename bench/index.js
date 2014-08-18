@@ -21,8 +21,8 @@ function benchSimple(cnt, cb) {
   var t = cnt;
   var m = p + t;
 
-  var people = db.collect('people', { name: 'text' });
-  var things = db.collect('things', { label: 'text', people: people });
+  var people = db.collect('people', { name: 'txt' });
+  var things = db.collect('things', { label: 'txt', people: people });
   var lookup = { people: [], things: [] };
 
   function write(cb) {

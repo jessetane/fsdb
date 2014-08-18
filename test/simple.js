@@ -9,7 +9,7 @@ tape('simple', function(t) {
   t.plan(17);
 
   var db = fsdb({ root: root });
-  var people = db.collect('people', { name: null, email: null });
+  var people = db.collect('people', { name: 'txt', email: 'txt' });
 
   // create
   var person = people.create({ name: 'you' }, function(err, p) {

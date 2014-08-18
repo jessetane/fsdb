@@ -9,9 +9,9 @@ tape('relationship', function(t) {
   t.plan(26);
 
   var db = fsdb({ root: root });
-  var people = db.collect('people', { name: null, email: null });
-  var things = db.collect('things', { label: null, owners: people });
-  var animals = db.collect('animals', { name: null, owners: people });
+  var people = db.collect('people', { name: 'txt', email: 'txt' });
+  var things = db.collect('things', { label: 'txt', owners: people });
+  var animals = db.collect('animals', { name: 'txt', owners: people });
 
   // create person
   var person = people.create({ name: 'you' }, function(err) {
@@ -48,7 +48,7 @@ tape('relationship', function(t) {
               t.equal(person.things[0].id, thing.id);
 
               // person -> animals
-              t.equal(person.animals.length, 0);
+              t.notOk(person.animals);
               person.animals = [ animal ];
               person.update(function(err) {
                 t.error(err);

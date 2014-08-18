@@ -1,13 +1,19 @@
 var fs = require('fs');
-var queue = require('queue');
-var xtend = require('xtend/mutable');
 var crypto = require('crypto');
+
+var inherits = require('inherits');
+var xtend = require('xtend/mutable');
 var mkdirp = require('mkdirp');
 var rimraf = require('rimraf');
-var inherits = require('inherits');
-var EventEmitter = require('events').EventEmitter;
+var queue = require('queue');
 
 FSDB.Model = FSDBModel;
+FSDB.formats = {
+  'txt': 'utf8',
+  'html': 'uf8',
+  'md': 'utf8',
+};
+
 module.exports = FSDB;
 
 function FSDB(opts) {
@@ -16,7 +22,7 @@ function FSDB(opts) {
 
   if (opts.root === undefined) {
     throw new Error('missing root');
-  } 
+  }
 
   this.root = opts.root;
   this.collections = {};
@@ -40,7 +46,7 @@ FSDB.prototype.collect = function(collectionName, Model) {
       FSDBModel.call(this, props);
     };
     inherits(Model, FSDBModel);
-    Model.fields = fields;
+    Model.fields = fields || {};
   }
 
   Model.aliases = {};
@@ -54,7 +60,7 @@ FSDB.prototype.collect = function(collectionName, Model) {
   };
   
   this.collections[collectionName] = Model;
-  updateRelationships.call(this);
+  updateAssociatedCollections.call(this);
 
   return Model;
 };
@@ -98,7 +104,10 @@ FSDB.prototype.ls = function(collectionName, opts, cb) {
     opts.cache = {};
 
     for (var i in ids) (function(id) {
-      if (/^\./.test(id)) return; // ignore hidden files
+
+      // ignore hidden files
+      if (/^\./.test(id)) return;
+
       var model = new Model({ id: id });
       models.push(model);
       q.push(model.read.bind(model, opts));
@@ -118,9 +127,10 @@ FSDB.prototype.ls = function(collectionName, opts, cb) {
 
       // limiting / paging
       var limit = opts.limit;
-      var page = opts.page || 1;
+      var page = opts.page || 0;
+      var pos = opts.position || page * limit;
       if (limit) {
-        models = models.slice(page * limit, limit);
+        models = models.slice(pos, pos + limit);
       }
 
       models.collection = collectionName;
@@ -154,54 +164,102 @@ function FSDBModel(props) {
 FSDBModel.prototype.read = function(opts, cb) {
   if (typeof opts === 'function') {
     cb = opts;
-    opts = {};
+    opts = null;
   }
 
   var self = this;
-  var cache = opts.cache || {};
+  var collection = this.constructor.collection;
+  var dir = mkroot(this.constructor.database.root) + '/' + collection + '/' + this.id;
+  var fields = this.constructor.fields;
+  var q = queue();
 
-  eachField.call(this, cache, function(name, field, value, cb) {
-    if (typeof field === 'function') {
-      var q = queue();
-      var circular = {};
-      circular[name] = {};
-      circular[name][self.id] = self;
-      self[name] = [];
-      
-      for (var i in value) {
-        var id = value[i];
-        if (cache.models &&
-            cache.models[field.collection] &&
-            cache.models[field.collection][id]) {
-          self[name].push(cache.models[field.collection][id]);
-        }
-        else if (opts.circular &&
-                 opts.circular[self.constructor.collection] &&
-                 opts.circular[self.constructor.collection][id]) {
-          self[name].push(opts.circular[self.constructor.collection][id]);
-        }
-        else {
-          var model = new field({ id: id });
-          self[name].push(model);
-          cache.models = cache.models || {};
-          cache.models[field.collection] = cache.models[field.collection] || {};
-          cache.models[field.collection][id] = model;
-          q.push(model.read.bind(model, { circular: circular, cache: cache }));
-        }
-      }
+  opts = opts || {};
+  opts.cache = opts.cache || {};
+  opts.cache.models = opts.cache.models || {};
+  opts.cache.models[collection] = opts.cache.models[collection] || {};
+  opts.cache.models[collection][this.id] = this;
 
-      q.start(cb);
-    }
-    else if (typeof value !== 'undefined') {
-      self[name] = value;
-      cb();
-    }
-    else {
-      cb();
-    }
-  }, function(err) {
+  fs.readdir(dir, function(err, files) {
     if (err) return cb && cb(err);
-    cb && cb(null, self);
+
+    files.forEach(function(file) {
+      if (/^\./.test(file)) return; // skip hidden files
+
+      var name = file.replace(/\.[^.]*/, '');
+      var type = fields[name] || file.replace(/.*\./, ''); // use built in type or extension
+
+      if (type === '_ignore_' || 
+          type === '_ignore_read_') return;
+
+      q.push(function(cb) {
+
+        // association
+        if (typeof type === 'function') {
+          fs.readdir(dir + '/' + file, function(err, ids) {
+            if (err) return cb(err);
+
+            var collection = type.collection;
+            var cache = opts.cache.models[collection] = opts.cache.models[collection] || {};
+            self[name] = [];
+
+            ids.forEach(function(id) {
+              if (cache[id]) {
+                self[name].push(cache[id]);
+              }
+              else {
+                var model = new type({ id: id });
+                self[name].push(model);
+                cache.models = cache.models || {};
+                cache.models[collection] = cache.models[collection] || {};
+                cache.models[collection][id] = model;
+                q.push(model.read.bind(model, opts));
+              }
+            });
+            cb();
+          });
+        }
+
+        // known format
+        else if (FSDB.formats[type]) {
+          fs.readFile(dir + '/' + file, FSDB.formats[type], function(err, data) {
+            if (err) return cb(err);
+            self[name] = data;
+            cb();
+          });
+        }
+
+        // needs stat
+        else {
+          fs.stat(dir + '/' + file, function(err, stat) {
+            if (err) return cb(err);
+
+            // directory
+            if (stat.isDirectory()) {
+              fs.readdir(dir + '/' + file, function(err, ids) {
+                if (err) return cb(err);
+                if (ids.length) self[name] = [];
+                ids.forEach(function(id) {
+                  if (/^\./.test(id)) return; // skip hidden files
+                  self[name].push(id);
+                });
+                cb();
+              });
+            }
+
+            // some binary file
+            else {
+              self[name] = file;
+              cb();
+            }
+          });
+        }
+      });
+    });
+
+    q.start(function(err) {
+      if (err) return cb && cb(err);
+      cb && cb(null, self);
+    });
   });
 
   return this;
@@ -210,8 +268,9 @@ FSDBModel.prototype.read = function(opts, cb) {
 FSDBModel.prototype.update = function(opts, cb) {
   if (typeof opts === 'function') {
     cb = opts;
-    opts = {};
+    opts = null;
   }
+  opts = opts || {};
 
   if (!this.id) {
     create.call(this, opts, cb);
@@ -219,57 +278,120 @@ FSDBModel.prototype.update = function(opts, cb) {
   }
 
   var self = this;
-  var cache = opts.cache || {};
   var dir = mkroot(this.constructor.database.root) + '/' + this.constructor.collection + '/' + this.id;
+  var fields = this.constructor.fields;
+  var q = queue();
 
-  eachField.call(this, cache, function(name, field, value, cb) {
-    if (typeof field === 'function') {
-      var oldids = {};
-      var newids = {};
-      var needAssociation = [];
-      var needDisassociation = [];
-
-      if (self[name] && !Array.isArray(self[name])) {
-        throw Error(self.constructor.collection + ' relationship field "' + name + '" should be of type Array');
+  for (var name in this) (function(name, value) {
+    var type = fields[name];
+    if (!type || typeof value === 'function') return;
+    if (typeof value === 'object') {
+      var tmp = [];
+      for (var i in value) {
+        tmp.push(value[i]);
       }
+      value = tmp;
+    }
 
-      for (var i in value) oldids[value[i]] = true;
-      for (var i in self[name]) newids[self[name][i].id] = true;
-      for (var id in newids) {
-        if (!oldids[id]) {
-          needAssociation.push(id);
-        }
+    if (Array.isArray(value)) {
+      q.push(function(cb) {
+        fs.readdir(dir + '/' + name, function(err, ids) {
+          if (err && err.code !== 'ENOENT') return cb(err);
+
+          ids = ids || [];
+          var oldids = {};
+          var newids = {};
+          var needCreate = [];
+          var needDelete = [];
+
+          for (var i in ids) {
+            oldids[ids[i]] = true;
+          }
+
+          // update associations
+          if (typeof type === 'function') {
+            for (var i in value) newids[value[i].id] = true;
+            for (var id in newids) {
+              if (!oldids[id]) {
+                needCreate.push(id);
+              }
+            }
+            for (var id in oldids) {
+              if (!newids[id]) {
+                needDelete.push(id);
+              }
+            }
+
+            if (needCreate.length) {
+              associate.call(self, q, name, type.collection, needCreate);
+            }
+            if (needDelete.length) {
+              disassociate.call(self, q, name, type.collection, needDelete);
+            }
+          }
+
+          // update dirs
+          else if (type === '_dir_') {
+            for (var i in value) {
+              var id = value[i];
+              if (id) {
+                if (typeof id === 'object' && id.id && id.stream) {
+                  needCreate.push(id);
+                }
+              }
+              else if (oldids[id]) {
+                needDelete.push(id);
+              }
+            }
+
+            if (needCreate.length) {
+              q.push(function(cb) {
+                mkdirp(dir + '/' + name, function(err) {
+                  if (err) return cb(err);
+                  for (var i in needCreate) {
+                    var id = needCreate[i].id;
+                    var stream = needCreate[i].stream;
+                    stream.pipe(fs.createWriteStream(dir + '/' + name + '/' + id));
+                  }
+                  cb();
+                });
+              });
+            }
+
+            if (needDelete.length) {
+              for (var i in needDelete) {
+                q.push(fs.unlink.bind(null, dir + '/' + name + '/' + needDelete[i]));
+              }
+            }
+          }
+
+          cb();
+        });
+      });
+    }
+
+    // write files
+    else if (value) {
+      if (type === '_dir_') {
+        cb(new Error(collection + '.' + self.id + '.' + name + ' should be of type Array'));
       }
-      for (var id in oldids) {
-        if (!newids[id]) {
-          needDisassociation.push(id);
-        }
-      }
-
-      if (needAssociation.length ||
-          needDisassociation.length) {
-        var q = queue();
-        
-        if (needAssociation.length) {
-          q.push(associate.bind(self, name, field.collection, needAssociation));
-        }
-        if (needDisassociation.length) {
-          q.push(disassociate.bind(self, name, field.collection, needDisassociation));
-        }
-
-        q.start(cb);
+      else if (value.readable) {
+        value.pipe(fs.createWriteStream(dir + '/' + name + '.' + type));
       }
       else {
-        cb();
+        q.push(function(cb) {
+          fs.writeFile(dir + '/' + name + '.' + type, value, FSDB.formats[type] || 'utf8', cb);
+        });
       }
     }
-    else if (self[name] !== value) {
-      fs.writeFile(dir + '/' + name, self[name], cb);
-    }
+
+    // delete files
     else {
-      cb();
+      q.push(fs.unlink.bind(null, dir + '/' + name + '.' + type));
     }
-  }, function(err) {
+  })(name, this[name]);
+
+  q.start(function(err) {
     if (err) return cb && cb(err);
     cb && cb(null, self);
   });
@@ -284,53 +406,55 @@ FSDBModel.prototype.destroy = function(opts, cb) {
   }
 
   var self = this;
-  var cache = opts.cache || {};
   var dir = mkroot(this.constructor.database.root) + '/' + this.constructor.collection + '/' + this.id;
+  var fields = this.constructor.fields;
+  var q = queue();
 
-  eachField.call(this, cache, function(name, field, value, cb) {
-    if (typeof field === 'function') {
-      var q = queue();
-
-      for (var i in value) {
-        var id = value[i];
-        var model = new field({ id: id });
-        q.push(disassociate.bind(model, self.constructor.collection, [ self.id ]));
-      }
-
-      q.start(cb);
+  for (var name in fields) (function(name, type) {
+    if (typeof type === 'function') {
+      q.push(function(cb) {
+        fs.readdir(dir + '/' + name, function(err, ids) {
+          if (err) return cb(err);
+          for (var i in ids) {
+            var id = ids[i];
+            var model = new type({ id: id });
+            disassociate.call(model, q, self.constructor.collection, [ self.id ]);
+          }
+          cb();
+        });
+      });
     }
-    else {
-      cb();
-    }
-  }, function(err) {
-    if (err) return cb && cb(err);
+  })(name, fields[name]);
+
+  q.start(function(err) {
+    if (err) return cb(err);
     rimraf(dir, cb);
   });
 
   return this;
 };
 
-function updateRelationships() {
+function updateAssociatedCollections() {
   for (var collectionName in this.collections) {
     var collection = this.collections[collectionName];
     for (var fieldName in collection.fields) {
       var field = collection.fields[fieldName];
       if (typeof field === 'function') {
-        var relative = this.collections[field.collection];
-        if (relative) {
+        var associated = this.collections[field.collection];
+        if (associated) {
           var needsReverseLookup = true;
-          for (var relativeFieldName in relative.fields) {
-            var relativeField = relative.fields[relativeFieldName];
-            if (relativeField === collection) {
-              collection.aliases[relative.collection] = relativeFieldName;
+          for (var associatedFieldName in associated.fields) {
+            var associatedField = associated.fields[associatedFieldName];
+            if (associatedField === collection) {
+              collection.aliases[associated.collection] = associatedFieldName;
               needsReverseLookup = false;
               break;
             }
           }
           if (needsReverseLookup) {
-            relative.fields = relative.fields || {};
-            relative.fields[collectionName] = collection;
-            relative.aliases[collectionName] = fieldName;
+            associated.fields = associated.fields || {};
+            associated.fields[collectionName] = collection;
+            associated.aliases[collectionName] = fieldName;
           }
         }
       }
@@ -362,53 +486,22 @@ function create(opts, cb) {
   });
 }
 
-function eachField(cache, fn, cb) {
-  var self = this;
-  var dir = mkroot(this.constructor.database.root) + '/' + this.constructor.collection + '/' + this.id;
-
-  fs.stat(dir, function(err) {
-    if (err) return cb(err);
-
-    var fields = self.constructor.fields;
-    var q = queue();
-
-    for (var name in fields) (function(name, field) {
-      q.push(function(cb) {
-        fs.readFile(dir + '/' + name, 'utf8', function(err, value) {
-          if (err) {
-            if (err.code === 'EISDIR') {
-              return fs.readdir(dir + '/' + name, function(err, value) {
-                if (err) return cb(err);
-                fn(name, field, value.filter(function(id) { return /^[^.]/.test(id) }), cb);
-              });
-            }
-          }
-          fn(name, field, value, cb);
-        });
-      });
-    })(name, fields[name]);
-
-    q.start(cb);
-  });
+function associate(q, field, collection, ids, cb) {
+  updateAssociations.call(this, q, field, collection, ids, false);
 }
 
-function associate(field, collection, ids, cb) {
-  updateAssociations.call(this, field, collection, ids, false, cb);
+function disassociate(q, field, collection, ids, cb) {
+  updateAssociations.call(this, q, field, collection, ids, true);
 }
 
-function disassociate(field, collection, ids, cb) {
-  updateAssociations.call(this, field, collection, ids, true, cb);
-}
-
-function updateAssociations(field, collection, ids, disassociate, cb) {
+function updateAssociations(q, field, collection, ids, disassociate) {
   var self = this;
   var root = mkroot(this.constructor.database.root);
   var associatedModel = self.constructor.database.collections[collection];
   var alias = self.constructor.aliases[collection] || self.constructor.collection;
-  var q = queue();
 
   for (var i in ids) (function(id) {
-    var links = [
+    [
       {
         src: '../../../' + self.constructor.collection + '/' + self.id,
         dest: root + '/' + collection + '/' + id + '/' + alias + '/' + self.id,
@@ -418,30 +511,27 @@ function updateAssociations(field, collection, ids, disassociate, cb) {
         dest: root + '/' + self.constructor.collection + '/' + self.id + '/' + field + '/' + id,
         dir: root + '/' + self.constructor.collection + '/' + self.id + '/' + field,
       }
-    ];
-    for (var i in links) (function(link) {
+    ].forEach(function(link) {
       q.push(function(cb) {
-        mkdirp(link.dir, function(err) {
-          if (err) return cb(err);
-          fs.stat(link.dest, function(doesNotExist, stat) {
-            if (doesNotExist) {
-              if (!disassociate) {
-                return fs.symlink(link.src, link.dest, cb);
-              }
+        fs.stat(link.dest, function(doesNotExist, stat) {
+          if (doesNotExist) {
+            if (!disassociate) {
+              return mkdirp(link.dir, function(err) {
+                if (err) return cb(err);
+                fs.symlink(link.src, link.dest, cb);
+              });
             }
-            else {
-              if (disassociate) {
-                return fs.unlink(link.dest, cb);
-              }
+          }
+          else {
+            if (disassociate) {
+              return fs.unlink(link.dest, cb);
             }
-            cb();
-          });
+          }
+          cb();
         });
       });
-    })(links[i]);
+    });
   })(ids[i]);
-  
-  q.start(cb);
 }
 
 function randomstring(len) {
