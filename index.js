@@ -284,7 +284,7 @@ FSDBModel.prototype.update = function(opts, cb) {
 
   for (var name in this) (function(name, value) {
     var type = fields[name];
-    if (!type || typeof value === 'function') return;
+    if (typeof value === 'function') return;
     if (typeof value === 'object') {
       var tmp = [];
       for (var i in value) {
@@ -330,8 +330,8 @@ FSDBModel.prototype.update = function(opts, cb) {
             }
           }
 
-          // update dirs
-          else if (type === '_dir_') {
+          // assume dir
+          else {
             for (var i in value) {
               var id = value[i];
               if (id) {
@@ -372,10 +372,8 @@ FSDBModel.prototype.update = function(opts, cb) {
 
     // write files
     else if (value) {
-      if (type === '_dir_') {
-        cb(new Error(collection + '.' + self.id + '.' + name + ' should be of type Array'));
-      }
-      else if (value.readable) {
+      type = type || 'txt';
+      if (value.readable) {
         value.pipe(fs.createWriteStream(dir + '/' + name + '.' + type));
       }
       else {
