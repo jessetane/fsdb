@@ -9,7 +9,7 @@ tape('simple', function(t) {
   t.plan(17);
 
   var db = fsdb({ root: root });
-  var people = db.collect('people', { name: 'txt', email: 'txt' });
+  var people = db.collect('people');
 
   // create
   var person = people.create({ name: 'you' }, function(err, p) {
@@ -29,7 +29,7 @@ tape('simple', function(t) {
       t.equal(p, person);
 
       // read
-      person  = people({ id: person.id });
+      person = people({ id: person.id });
       person.read(function(err, p) {
         t.error(err);
         t.ok(person.id);
@@ -38,11 +38,12 @@ tape('simple', function(t) {
         t.equal(p, person);
 
         // delete
+        console.log(person);
         person.destroy(function(err) {
           t.error(err);
 
           // confirm
-          person  = people({ id: person.id });
+          person = people({ id: person.id });
           person.read(function(err) {
             t.ok(err);
           });

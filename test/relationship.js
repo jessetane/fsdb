@@ -9,9 +9,9 @@ tape('relationship', function(t) {
   t.plan(26);
 
   var db = fsdb({ root: root });
-  var people = db.collect('people', { name: 'txt', email: 'txt' });
-  var things = db.collect('things', { label: 'txt', owners: people });
-  var animals = db.collect('animals', { name: 'txt', owners: people });
+  var people = db.collect('people');
+  var things = db.collect('things', { owners: people });
+  var animals = db.collect('animals', { owners: people });
 
   // create person
   var person = people.create({ name: 'you' }, function(err) {
