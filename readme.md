@@ -107,7 +107,7 @@ running simple benchmark with 5000 ops
 
 ## Releases
 An abbreviated changelog and release tarballs below:
-* [2.0.1](https://github.com/jessetane/fsdb/releases/tag/2.0.1)
+* [2.0.x](https://github.com/jessetane/fsdb/releases/tag/2.0.1)
  * August 21 2014, major redesign to support modular field types
 * [1.0.0](https://github.com/jessetane/fsdb/releases/tag/1.0.0)
  * August 10 2014, an experimental prototype
