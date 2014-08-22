@@ -1,8 +1,8 @@
 # fsdb
-Human-friendly databases made with files, directories and symlinks.
+Human-friendly databases made with files and directories.
 
 ## Why
-A database backed by filesystem primitives is not very efficient and has no sorting capabilities; it is generally "fast enough" for small datasets though and rather convenient as you can browse and edit from your shell or explorer gui!
+A database backed by filesystem primitives is not particularly efficient and has no native sorting capabilities; it is generally "fast enough" for small datasets though and rather convenient as you can browse and edit from your shell or explorer gui!
 
 ## How
 
@@ -14,15 +14,8 @@ var db = fsdb({ root: __dirname + '/db' });
 
 Define some collections
 ``` javascript
-var pets = db.collect('pets', {
-  name: 'text',
-});
-
-var peeps = db.collect('peeps', {
-  name: 'text',
-  email: 'text',
-  pets: pets	   // indicates a relationship
-});
+var pets = db.collect('pets');
+var peeps = db.collect('peeps');
 ```
 
 Make some stuff
@@ -39,16 +32,22 @@ var you = peeps.create({
 
 var dog = pets.create({ name: 'dog' });
 var cat = pets.create({ name: 'cat' });
-var bird = pets.create({ name: 'bird' });
+var bird = pets.create({ name: 'untitled' });
 ```
 
-Form some relationships
+Make updates
 ``` javascript
-me.pets = [ dog, cat ];
-me.update();
+bird.name = 'bird';
+bird.update();
+```
 
-you.pets = [ dog, bird ];
-you.update();
+Add sub-collections
+``` javascript
+bird.photos = [
+  { id: 'one.jpg', data: someReadStream }, 
+  { id: 'two.jpg', Buffer('not really a jpg!') }
+];
+bird.update();
 ```
 
 Enjoy your database
@@ -56,77 +55,60 @@ Enjoy your database
 $ tree db
 db/
 ├── peeps
-│   ├── 62fa108b
-│   │   ├── name
-│   │   └── pets
-│   │       ├── bb1e4dbe -> /db/pets/bb1e4dbe
-│   │       └── d941e466 -> /db/pets/d941e466
-│   └── e493e456
-│       ├── name
-│       └── pets
-│           ├── 3cc31128 -> /db/pets/3cc31128
-│           └── d941e466 -> /db/pets/d941e466
+│   ├── 302920c4
+│   │   ├── email.txt
+│   │   └── name.txt
+│   └── ecc19d3e
+│       ├── email.txt
+│       └── name.txt
 └── pets
-    ├── 3cc31128
-    │   ├── name
-    │   └── peeps
-    │       └── e493e456 -> /db/peeps/e493e456
-    ├── bb1e4dbe
-    │   ├── name
-    │   └── peeps
-    │       └── 62fa108b -> /db/peeps/62fa108b
-    └── d941e466
-        ├── name
-        └── peeps
-            ├── 62fa108b -> /db/peeps/62fa108b
-            └── e493e456 -> /db/peeps/e493e456
+    ├── 076b5241
+    │   └── name.txt
+    ├── 9b554948
+    │   └── name.txt
+    └── ab234997
+        ├── name.txt
+        └── photos
+            ├── one.jpg
+            └── two.jpg
 
-20 directories, 5 files
+8 directories, 9 files
 ```
 
+## Fields
+* Each field is a separate file
+* There are three built-in types: text files, hidden files and directories
+* Field types are implemented as modular plugins, see the [built-ins](https://github.com/jessetane/fsdb/tree/master/lib) for examples
+* Register custom field types by name: `db.collections.peeps.fields.photo = require('some-fsdb-binary-file-plugin')`
+* Register custom field types by extension: `db.types['tar.gz'] = require('some-fsdb-tar-plugin')`
+
 ## Tests
-There are some simple tests written with [tape](https://github.com/substack/tape). You can browse them [here](https://github.com/jessetane/fsdb/tree/master/test), and run them with:
+The tests are written with [tape](https://github.com/substack/tape). You can browse them [here](https://github.com/jessetane/fsdb/tree/master/test), and run them with:
 ``` bash
 $ npm test
 ```
 
 ## Performance
-Write performance is basically terrible - read performance is pretty bad too, but only for bigger data sets - for smallish ones, humans will probably experience quite reasonable speeds (these were run on an macbook pro with an ssd, ymmv):
+Performance is basically terrible, but only compared to more traditional databases - unless you're operating at a pretty significant scale, you will probably experience quite reasonable speeds (these were run on an macbook pro with an ssd, ymmv):
 ``` bash
 $ node bench
 running simple benchmark with 50 ops
-50 models created in 0.018 seconds
-50 relationships created in 0.007 seconds
-50 models read in 0.010 seconds
+50 models created in 0.029 seconds
+50 models read in 0.015 seconds
 
-running simple benchmark with 100 ops
-100 models created in 0.042 seconds
-100 relationships created in 0.012 seconds
-100 models read in 0.015 seconds
+running simple benchmark with 500 ops
+500 models created in 0.199 seconds
+500 models read in 0.117 seconds
 
-running simple benchmark with 1000 ops
-1000 models created in 0.315 seconds
-1000 relationships created in 0.188 seconds
-1000 models read in 0.163 seconds
-
-running simple benchmark with 10000 ops
-10000 models created in 5.091 seconds
-10000 relationships created in 4.017 seconds
-10000 models read in 1.785 seconds
+running simple benchmark with 5000 ops
+5000 models created in 2.505 seconds
+5000 models read in 0.981 seconds
 ```
-
-## Notes
-#### Relationships
-Are only, and always(!) symetrical many-to-many relationships. Just some ideas here:
- * Why many-to-many? Everything is cool when you start out building your db and thinking object x will only ever have 1 y, but inevitably you end up pluralizing almost every relationship - so maybe just start out this way?
-
-#### Misc
- * Field types aren't really a thing at this point - data is either text or a relationship
- * No events are broadcast, but you could use [gaze](https://github.com/shama/gaze)?
- * No search or sort for collections or relationships is included - maybe some indexing features could be added?
 
 ## Releases
 An abbreviated changelog and release tarballs below:
+* [2.0.0](https://github.com/jessetane/fsdb/releases/tag/1.0.0)
+ * August 21 2014, major redesign to support modular field types
 * [1.0.0](https://github.com/jessetane/fsdb/releases/tag/1.0.0)
  * August 10 2014, an experimental prototype
 
