@@ -3,7 +3,6 @@ var fsdb = require('../');
 var tape = require('tape');
 var rimraf = require('rimraf');
 var thru = require('through2');
-var queue = require('queue');
 
 var root = __dirname + '/db'
 rimraf.sync(root);
