@@ -7,13 +7,13 @@ var root = '/tmp/fsdb';
 
 // queue up benchmarks synchronously
 var q = queue({ concurrency: 1 });
+q.push(rimraf.bind(null, root));
 q.push(benchSimple.bind(null, 50));
 q.push(benchSimple.bind(null, 500));
 q.push(benchSimple.bind(null, 5000));
 q.start();
 
 function benchSimple(cnt, cb) {
-  rimraf.sync(root);
   var db = fsdb({ root: root });
   var people = db.collect('people');
 
