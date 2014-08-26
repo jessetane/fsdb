@@ -83,13 +83,14 @@ FSDB.prototype.discard = function(collectionName) {
 };
 
 FSDB.prototype.ls = function(collectionName, opts, cb) {
+  if (!collectionName) collectionName = '';
   if (typeof opts === 'function') {
     cb = opts;
     opts = {};
   }
 
   var self = this;
-  var Model = self.collections[collectionName] || this.collect(collectionName);
+  var Model = collectionName ? (self.collections[collectionName] || this.collect(collectionName)) : null;
 
   fs.readdir(mkroot(this.root) + '/' + collectionName, function(err, ids) {
     if (err) return cb(err);
@@ -103,16 +104,21 @@ FSDB.prototype.ls = function(collectionName, opts, cb) {
       // hidden files can never be considered ids
       if (/^\./.test(id)) return;
 
-      var model = new Model({ id: id });
-      models.push(model);
-      q.push(model.read.bind(model, opts));
+      if (Model) {
+        var model = new Model({ id: id });
+        models.push(model);
+        q.push(model.read.bind(model, opts));
+      }
+      else {
+        models.push(id);
+      }
     })(ids[i]);
     
     q.start(function(err) {
       if (err) return cb(err);
 
       var order = opts.order;
-      if (order) {
+      if (Model && order) {
         models.sort(function(a, b) {
           if (a[order] === b[order]) return 0;
           return a[order] > b[order] ? 1 : -1;
@@ -176,7 +182,15 @@ FSDBModel.prototype.read = function(opts, cb) {
   opts.cache.models[collectionName][this.id] = this;
 
   fs.readdir(dir, function(err, files) {
-    if (err) return cb && cb(err);
+    if (err) {
+      if (err.code === 'ENOTDIR') {
+        self = dir.replace(/.*\//);
+        files = [];
+      }
+      else {
+        return cb && cb(err);
+      }
+    }
 
     files.forEach(function(file) {
       var name = file.replace(/([.]*[^.]+)\..*/, '$1');
