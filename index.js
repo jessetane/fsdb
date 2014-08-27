@@ -121,6 +121,8 @@ FSDB.prototype.ls = function(collectionName, opts, cb) {
       if (Model && order) {
         models.sort(function(a, b) {
           if (a[order] === b[order]) return 0;
+          if (a[order] === undefined) a[order] = Infinity;
+          if (b[order] === undefined) b[order] = Infinity;
           return a[order] > b[order] ? 1 : -1;
         });
       }
