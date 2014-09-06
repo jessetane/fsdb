@@ -1,358 +1,305 @@
-var fs = require('fs');
 var crypto = require('crypto');
-
-var inherits = require('inherits');
-var xtend = require('xtend/mutable');
 var mkdirp = require('mkdirp');
 var rimraf = require('rimraf');
+var xtend = require('xtend/mutable');
 var queue = require('queue');
+var splitpath = require('./lib/splitpath');
 
-FSDB.Model = FSDBModel;
-
-module.exports = FSDB;
-
-function FSDB(opts) {
-  if (!(this instanceof FSDB))
-    return new FSDB(opts);
-
+module.exports = function(opts) {
   opts = opts || {};
 
-  if (opts.root === undefined) {
+  if (!opts.root) {
     throw new Error('missing root');
   }
 
-  this.fields = {};
-  this.collections = {};
-  this.idsize = 8;
-  this.defaultType = 'txt';
-  this.types = {
-    'txt': require('./lib/fsdb-txt'),
-    '_directory': require('./lib/fsdb-directory'),
-    '_hidden': require('./lib/fsdb-hidden'),
+  var fs = opts.fs || require('fs');
+  var root = opts.root || process.cwd();
+  var types = xtend({ 'txt': require('./lib/fsdb-txt') }, opts.types);
+  var muxer = opts.muxer;
+  var idsize = opts.idsize || 8;
+
+  FSDB.create = function(db, opts, cb) {
+    return FSDB(db).create(opts, cb);
   };
 
-  xtend(this, opts);
-}
-
-FSDB.prototype.collect = function(collectionName, fields) {
-  if (this.collections[collectionName]) {
-    throw new Error('collection ' + collectionName + ' exists');
-  }
-
-  var Model = function FSDBModelExtension(props) {
-    if (!(this instanceof FSDBModelExtension))
-      return new FSDBModelExtension(props);
-    FSDBModel.call(this, props);
+  FSDB.read = function(db, opts, cb) {
+    return FSDB(db).read(opts, cb);
   };
-  inherits(Model, FSDBModel);
 
-  Model.fields = fields || {};
-  Model.database = this;
-  Model.collectionName = collectionName;
-
-  Model.create = function(model, cb) {
-    return this.database.create(this.collectionName, model, cb);
+  FSDB.update = function(db, opts, cb) {
+    return FSDB(db).update(opts, cb);
   };
-  Model.ls = function(opts, cb) {
-    return this.database.ls(this.collectionName, opts, cb);
+
+  FSDB.destroy = function(db, opts, cb) {
+    return FSDB(db).destroy(opts, cb);
   };
-  
-  return this.collections[collectionName] = Model;
-};
 
-FSDB.prototype.discard = function(collectionName) {
-  this.ls(collectionName, function(err, models) {
-    if (err) return cb(err);
+  function FSDB(db) {
+    if (!(this instanceof FSDB))
+      return new FSDB(db);
 
-    var self = this;
-    var q = queue();
+    db = db || {};
 
-    for (var i in models) (function(model) {
-      q.push(function(cb) {
-        model.destroy(cb);
-      });
-    })(models[i]);
-    
-    q.start(function(err) {
-      if (err) return cb(err);
-      delete self.collections[collectionName];
-    });
-  });
-
-  return this;
-};
-
-FSDB.prototype.ls = function(collectionName, opts, cb) {
-  if (!collectionName) collectionName = '';
-  if (typeof opts === 'function') {
-    cb = opts;
-    opts = {};
-  }
-
-  var self = this;
-  var Model = collectionName ? (self.collections[collectionName] || this.collect(collectionName)) : null;
-
-  fs.readdir(mkroot(this.root) + '/' + collectionName, function(err, ids) {
-    if (err) return cb(err);
-
-    var models = [];
-    var q = queue();
-    opts.cache = {};
-
-    for (var i in ids) (function(id) {
-
-      // hidden files can never be considered ids
-      if (/^\./.test(id)) return;
-
-      if (Model) {
-        var model = new Model({ id: id });
-        models.push(model);
-        q.push(model.read.bind(model, opts));
-      }
-      else {
-        models.push(id);
-      }
-    })(ids[i]);
-    
-    q.start(function(err) {
-      if (err) return cb(err);
-
-      var order = opts.order;
-      if (Model && order) {
-        models.sort(function(a, b) {
-          if (a[order] === b[order]) return 0;
-          if (a[order] === undefined) a[order] = Infinity;
-          if (b[order] === undefined) b[order] = Infinity;
-          return a[order] > b[order] ? 1 : -1;
-        });
-      }
-
-      var limit = opts.limit;
-      var page = opts.page || 0;
-      var pos = opts.position || page * limit;
-      if (limit) {
-        models = models.slice(pos, pos + limit);
-      }
-
-      cb(null, models);
-    });
-  });
-
-  return this;
-};
-
-FSDB.prototype.read = function(collectionName, model, opts, cb) {
-  var Model = this.collections[collectionName] || this.collect(collectionName);
-  model = new Model(model);
-  return model.read(opts, cb);
-};
-
-FSDB.prototype.create = 
-FSDB.prototype.update = function(collectionName, model, opts, cb) {
-  var Model = this.collections[collectionName] || this.collect(collectionName);
-  model = new Model(model);
-  return model.update(opts, cb);
-};
-
-FSDB.prototype.destroy = function(collectionName, model, opts, cb) {
-  var Model = this.collections[collectionName] || this.collect(collectionName);
-  model = new Model(model);
-  return model.destroy(opts, cb);
-};
-
-function FSDBModel(props) {
-  xtend(this, props);
-}
-
-FSDBModel.prototype.read = function(opts, cb) {
-  if (typeof opts === 'function') {
-    cb = opts;
-    opts = null;
-  }
-
-  var self = this;
-  var db = this.constructor.database;
-  var collectionName = this.constructor.collectionName;
-  var dir = mkroot(db.root) + '/' + collectionName + '/' + this.id;
-  var fields = this.constructor.fields;
-  var q = queue();
-
-  opts = opts || {};
-  opts.cache = opts.cache || {};
-  opts.cache.models = opts.cache.models || {};
-  opts.cache.models[collectionName] = opts.cache.models[collectionName] || {};
-  opts.cache.models[collectionName][this.id] = this;
-
-  fs.readdir(dir, function(err, files) {
-    if (err) {
-      if (err.code === 'ENOTDIR') {
-        self = dir.replace(/.*\//);
-        files = [];
-      }
-      else {
-        return cb && cb(err);
-      }
+    if (typeof db === 'string') {
+      db = splitpath(db);
+      this.id = db[1];
+      this.location = db[0];
+    }
+    else {
+      this.id = db.id || '';
+      this.location = db.location || '/';
     }
 
-    files.forEach(function(file) {
-      var name = file.replace(/([.]*[^.]+)\..*/, '$1');
-      var ext =  file.replace(/[.]*[^.]+\.(.*)/, '$1');
-      var type = fields[name];
+    this.files = {};
+    this.folders = [];
+  }
 
-      if (!type && /^\./.test(name)) {
-        var t = db.types['_hidden'];
-        if (t) type = t;
-      }
+  FSDB.prototype.create = function(opts, cb) {
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = null;
+    }
+    opts = opts || {};
 
-      if (!type && ext && ext !== name) {
-        var t = db.types[ext];
-        if (t) type = t;
-      }
+    var self = this;
+    if (!this.id && this.location !== '/') {
+      this.id = crypto.createHash('sha256')
+                      .update(crypto.randomBytes(256))
+                      .digest('hex')
+                      .slice(0, idsize || 16).toLowerCase();
 
-      q.push(function(cb) {
-        var filename = dir + '/' + name + (ext && ext !== name ? '.' + ext : '');
-        if (type) {
-          type.read.call(self, filename, name, opts, cb);
+      var fullpath = mkfullpath.call(this);
+      fs.exists(fullpath, function(exists) {
+        if (exists) self.id = '';
+        self.create(opts, cb);
+      });
+
+      return this;
+    }
+
+    var fullpath = mkfullpath.call(this);
+    mkdirp(fullpath, { fs: fs }, function(err) {
+      if (err) return cb(err);
+      self.update(opts, cb);
+    });
+
+    return this;
+  };
+
+  FSDB.prototype.update = function(opts, cb) {
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = null;
+    }
+    opts = opts || {};
+
+    var self = this;
+    var fullpath = mkfullpath.call(this);
+
+    fs.exists(fullpath, function(exists) {
+      if (!exists) return cb(new Error('folder does not exist'));
+      var q = queue();
+
+      // files
+      for (var name in self.files) (function(name, file) {
+        if (file && typeof file !== 'object') {
+          file = self.files[name] = { data: file };
+        }
+
+        var fullpath = mkfullpath.call(self, name);
+        var ext = (file && file.type) || name.replace(/[.]*[^.]+\.(.*)/, '$1');
+        var type = mktype(ext);
+
+        if (file) {
+          if (type && type.update) {
+            q.push(function(cb) {
+              type.update.call(self, fs, fullpath, name, file.stat, opts, cb);
+            });
+          }
+          else {
+            // if no update method was found don't do anything
+          }
         }
         else {
-          fs.stat(filename, function(err, stat) {
-            if (err) return cb(err);
+          if (type && type.destroy) {
+            q.push(function(cb) {
+              type.destroy.call(self, fs, fullpath, name, file.stat, opts, cb);
+            });
+          }
+          else {
+            q.push(function(cb) {
+              delete self.files[name];
+              self.fs.unlink(fullpath, cb);
+            });
+          }
+        }
+      })(name, self.files[name]);
 
-            if (stat.isDirectory() && db.types['_directory']) {
-              db.types['_directory'].read.call(self, filename, name, opts, cb);
+      // folders
+      for (var id in self.folders) (function(folder) {
+        if (folder) {
+          q.push(function(cb) {
+            folder.update(opts, cb);
+          });
+        }
+        else {
+          q.push(function(cb) {
+            folder.destroy(cb);
+          });
+        }
+      })(self.folders[id]);
+
+      q.start(function(err) {
+        cb && cb(err, self);
+      });
+    });
+
+    return this;
+  };
+
+  FSDB.prototype.read = function(opts, cb) {
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = null;
+    }
+    opts = opts || {};
+
+    var self = this;
+    var folders = [];
+    var fullpath = mkfullpath.call(this);
+    var q = queue();
+
+    fs.readdir(fullpath, function(err, filenames) {
+      if (err) return cb(err);
+
+      filenames.map(function(filename) {
+        q.push(function(cb) {
+          var fullpath = mkfullpath.call(self, filename);
+          fs.stat(fullpath, function(err, stat) {
+            if (err) return cb(err);
+            
+            var isfile = stat.isFile();
+            var isdir = stat.isDirectory();
+            if (!isfile && !isdir) return;
+
+            if (isdir) {
+              var db = new FSDB(self.location + '/' + self.id + '/' + filename);
+              folders.push(db);
+
+              if (!opts.shallow) {
+                var diropts = xtend({}, opts);
+                diropts.shallow = true;
+                delete diropts.limit;
+                delete diropts.sort;
+                return db.read(diropts, cb);
+              }
+
+              cb();
             }
             else {
-              //self[name] = fs.createReadStream.bind(null, filename);
+              var ext =  filename.replace(/[.]*[^.]+\.(.*)/, '$1');
+              var type = mktype(ext);
+              self.files[filename] = { type: ext, /*stat: stat,*/ };
+
+              if (type && type.read) {
+                return type.read.call(self, fs, fullpath, filename, stat, opts, cb);
+              }
+              
               cb();
             }
           });
+        });
+      });
+
+      q.start(function(err) {
+        if (err) return cb && cb(err);
+
+        // sort
+        var sort = opts.sort;
+        if (sort) {
+          folders.sort(function(dba, dbb) {
+            var a = dba.files[sort];
+            var b = dbb.files[sort];
+            a = a && a.data !== undefined ? a.data : Infinity;
+            b = b && b.data !== undefined ? b.data : Infinity;
+            return a > b ? 1 : -1;
+          });
         }
+
+        // limit
+        var limit = opts.limit;
+        var page = opts.page || 0;
+        var pos = opts.position || page * limit;
+        if (limit) {
+          folders = folders.slice(pos, pos + limit);
+        }
+
+        // save folders
+        self.folders = folders;
+
+        cb && cb(null, self);
       });
     });
 
-    q.start(function(err) {
-      if (err) return cb && cb(err);
-      cb && cb(null, self);
-    });
-  });
-
-  return this;
-};
-
-FSDBModel.prototype.update = function(opts, cb) {
-  if (typeof opts === 'function') {
-    cb = opts;
-    opts = null;
-  }
-  opts = opts || {};
-
-  if (!this.id) {
-    create.call(this, opts, cb);
     return this;
-  }
+  };
 
-  var self = this;
-  var db = this.constructor.database;
-  var dir = mkroot(db.root) + '/' + this.constructor.collectionName + '/' + this.id;
-  var fields = this.constructor.fields;
-  var q = queue();
-
-  for (var name in this) (function(name, value) {
-    if (name === 'id' || typeof value === 'function') return;
-
-    var ext = '';
-    var type = fields[name];
-
-    if (!type && Array.isArray(value)) {
-      var t = db.types['_directory'];
-      if (t) type = t;
+  FSDB.prototype.destroy = function(opts, cb) {
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = null;
     }
+    opts = opts || {};
 
-    if (!type) {
-      type = db.defaultType;
-    }
+    var self = this;
+    var fullpath = mkfullpath.call(this);
 
-    if (typeof type === 'string') {
-      var t = db.types[type];
-      if (!t) return cb(new Error('unrecognized field type "' + type + '"'));
-      if (!/^_/.test(type)) ext = type;
-      type = t;
-    }
-
-    if (type) {
-      ext = (ext ? '.' + ext : '');
-      q.push(function(cb) {
-        type.update.call(self, dir + '/' + name + ext, name, opts, cb);
-      });
-    }
-  })(name, this[name]);
-
-  q.start(function(err) {
-    if (err) return cb && cb(err);
-    cb && cb(null, self);
-  });
-
-  return this;
-};
-
-FSDBModel.prototype.destroy = function(opts, cb) {
-  if (typeof opts === 'function') {
-    cb = opts;
-    opts = {};
-  }
-
-  var self = this;
-  var dir = mkroot(this.constructor.database.root) + '/' + this.constructor.collectionName + '/' + this.id;
-  var fields = this.constructor.fields;
-  var q = queue();
-
-  for (var name in fields) (function(name, type) {
-    if (type.destroy) {
-      q.push(function(cb) {
-        type.destroy.call(self, name, type.extension, dir, opts, cb);
-      });
-    }
-  })(name, fields[name]);
-
-  q.start(function(err) {
-    if (err) return cb(err);
-    rimraf(dir, cb);
-  });
-
-  return this;
-};
-
-function create(opts, cb) {
-  if (typeof opts === 'function') {
-    cb = opts;
-    opts = {};
-  }
-
-  var self = this;
-  var db = this.constructor.database;
-  var id = randomstring(this.constructor.database.idsize);
-  var dir = mkroot(db.root) + '/' + this.constructor.collectionName + '/' + id;
-
-  fs.exists(dir, function(exists) {
-    if (exists) {
-      return create.call(self, opts, cb);
-    }
-
-    mkdirp(dir, function(err) {
+    this.read({ shallow: true }, function(err) {
       if (err) return cb(err);
+      var q = queue();
 
-      self.id = id;
-      self.update(opts, cb);
+      // files
+      for (var name in self.files) (function(name, file) {
+        var fullpath = mkfullpath.call(self, name);
+        var ext = file.type || name.replace(/[.]*[^.]+\.(.*)/, '$1');
+        var type = mktype(ext);
+
+        if (type && type.destroy) {
+          q.push(function(cb) {
+            type.destroy.call(self, fs, fullpath, name, null, opts, cb);
+          });
+        }
+      })(name, self.files[name]);
+
+      // folders
+      for (var id in self.folders) (function(folder) {
+        q.push(function(cb) {
+          folder.destroy(opts, cb);
+        });
+      })(self.folders[id]);
+
+      q.start(function(err) {
+        if (err) return cb(err);
+        rimraf(fullpath, fs, function(err) {
+          cb & cb(err, self);
+        });
+      });
     });
-  });
-}
 
-function randomstring(len) {
-  var hash = crypto.createHash('sha256');
-  hash.update(crypto.randomBytes(256));
-  return hash.digest('hex').slice(0, len || 16).toLowerCase();
-}
+    return this;
+  };
 
-function mkroot(root) {
-  return root === '/' ? '' : root;
-}
+  function mkfullpath(id) {
+    id = id || '';
+    var p = splitpath(root + '/' + this.location + '/' + this.id + '/' + id);
+    return p[1] ? p[0] + '/' + p[1] : p[0];
+  }
+
+  function mktype(ext) {
+    var type = types[ext];
+    if (typeof type === 'string') type = types[type];
+    return type;
+  }
+
+  return FSDB;
+};
