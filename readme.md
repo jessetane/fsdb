@@ -1,8 +1,11 @@
 # fsdb
-Human-friendly databases made with files and directories.
+Human-friendly databases made with files and folders.
+
+## Warning
+This readme is currently out of date! It will get updated when 3.x is out of alpha...
 
 ## Why
-A database backed by filesystem primitives is not particularly efficient and has no native sorting capabilities; it is generally "fast enough" for small datasets though and rather convenient as you can browse and edit from your shell or explorer gui!
+A database backed by filesystem primitives is not particularly efficient and has no native sorting capabilities; it is generally fast enough for small datasets though and rather convenient as you can browse and edit from your shell or explorer gui!
 
 ## How
 
