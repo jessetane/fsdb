@@ -13,7 +13,7 @@
   },
   "scripts": {
     "test": "node test",
-    "example": "node example/complex"
+    "bench": "node bench"
   },
   "repository": "https://github.com/jessetane/fsdb",
   "author": "Jesse Tane <jesse.tane@gmail.com>",
