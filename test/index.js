@@ -1,268 +1,88 @@
 var fs = require('fs');
-var fsdb = require('../');
 var tape = require('tape');
 var rimraf = require('rimraf');
-var thru = require('through2');
+var mkfsdb = require('../');
 
-var root = __dirname + '/db'
-rimraf.sync(root);
-
-var db = fsdb({ root: root });
-var people = db.collect('people');
-var you = null;
+var root = '/tmp/fsdb-' + ~~(Math.random() * 1000);
+var fsdb = mkfsdb({ root: root });
+var db = null;
+var people = null;
 var me = null;
+var you = null;
 var everyone = null;
+var auto = null;
 
 tape('create', function(t) {
-  t.plan(5);
+  t.plan(2);
 
-  you = people.create({ name: 'you' }, function(err, person) {
+  db = fsdb().create(function(err) {
     t.error(err);
-    t.equal(you, person);
-    t.ok(you.id);
-    t.equal(you.name, 'you');
-    t.notOk(you.email);
-
-    fs.mkdirSync(__dirname + '/db/pre-existing');
-    fs.mkdirSync(__dirname + '/db/pre-existing/thing');
-    fs.writeFileSync(__dirname + '/db/pre-existing/thing/name.txt', 'some pre-existing thing');
+    t.equal(db.id, '');
   });
 });
 
-tape('update', function(t) {
-  t.plan(6);
+tape('create collection', function(t) {
+  t.plan(2);
 
-  you.email = 'you@yours.com';
-  you.sort = '0';
-  you.update(function(err, person) {
+  people = fsdb('people').create(function(err) {
     t.error(err);
-    t.equal(you, person);
-    t.ok(you.id);
-    t.equal(you.name, 'you');
-    t.equal(you.email, 'you@yours.com');
-    t.equal(you.sort, '0');
+    t.equal(people.id, 'people');
   });
 });
 
-tape('read', function(t) {
-  t.plan(5);
+tape('create model', function(t) {
+  t.plan(2);
 
-  you = people({ id: you.id });
-  you.read(function(err, person) {
+  var tmp = fsdb('people/you');
+  tmp.files['name.txt'] = { data: 'you' };
+  tmp.create(function(err) {
     t.error(err);
-    t.equal(you, person);
-    t.ok(you.id);
-    t.equal(you.name, 'you');
-    t.equal(you.email, 'you@yours.com');
+    t.equal(tmp.id, 'you');
   });
 });
 
-tape('hidden files', function(t) {
-  t.plan(4);
-
-  fs.writeFileSync(__dirname + '/db/people/' + you.id + '/.dotfile.txt', 'this is a hidden file');
-  var hiddenType = db.types['_hidden'];
-  delete db.types['_hidden'];
-
-  you = people({ id: you.id });
-  you.read(function(err) {
-    t.error(err);
-    t.equal(you['.dotfile'], 'this is a hidden file');
-    
-    db.types['_hidden'] = hiddenType;
-    you = people({ id: you.id });
-    you.read(function(err) {
-      t.error(err);
-      t.equal(you['.dotfile'], undefined);
-    });
-  });
-});
-
-tape('ls', function(t) {
-  t.plan(5);
-
-  fs.mkdirSync(__dirname + '/db/people/.hidden');
-  fs.writeFileSync(__dirname + '/db/people/.hidden/email.txt', 'everyone we know');
-
-  me = people.create({ name: 'me', email: 'me@mine.com', sort: '1' }, function(err) {
-    t.error(err);
-
-    people.ls(function(err, models) {
-      t.error(err);
-      t.equal(models.length, 2);
-      t.ok(models[0].name);
-      t.ok(models[1].name);
-    });
-  });
-});
-
-tape('ls pre-existing', function(t) {
-  t.plan(3);
-  
-  db.ls('pre-existing', function(err, models) {
-    t.error(err);
-    t.equal(models.length, 1);
-    t.equal(models[0].name, 'some pre-existing thing');
-  });
-});
-
-tape('order', function(t) {
-  t.plan(6);
-
-  people.create({ name: 'everyone we know', email: 'everyone@we.know.com', sort: '2' }, function(err) {
-    t.error(err);
-    
-    people.ls({ order: 'sort' }, function(err, models) {
-      t.error(err);
-      t.equal(models.length, 3);
-      t.equal(models[0].name, 'you');
-      t.equal(models[1].name, 'me');
-      t.equal(models[2].name, 'everyone we know');
-    });
-  });
-});
-
-tape('limit', function(t) {
-  t.plan(3);
-  people.ls({ order: 'sort', limit: 1 }, function(err, models) {
-    t.error(err);
-    t.equal(models.length, 1);
-    t.equal(models[0].name, 'you');
-  });
-});
-
-tape('page', function(t) {
-  t.plan(3);
-  people.ls({ order: 'sort', limit: 1, page: 2 }, function(err, models) {
-    t.error(err);
-    t.equal(models.length, 1);
-    t.equal(models[0].name, 'everyone we know');
-  });
-});
-
-tape('position', function(t) {
-  t.plan(3);
-  people.ls({ order: 'sort', limit: 2, position: 1 }, function(err, models) {
-    t.error(err);
-    t.equal(models.length, 2);
-    t.equal(models[0].name, 'me');
-  });
-});
-
-tape('directory read', function(t) {
-  t.plan(5);
-  
-  fs.mkdirSync(__dirname + '/db/people/' + you.id + '/documents');
-  fs.writeFileSync(__dirname + '/db/people/' + you.id + '/documents/one', '1');
-  fs.writeFileSync(__dirname + '/db/people/' + you.id + '/documents/two', '2');
-  fs.writeFileSync(__dirname + '/db/people/' + you.id + '/documents/three', '3');
-
-  you.read(function(err) {
-    t.error(err);
-    you.documents.sort();
-    t.equal(you.documents.length, 3);
-    t.equal(you.documents[0], 'one');
-    t.equal(you.documents[1], 'three');
-    t.equal(you.documents[2], 'two');
-  });
-});
-
-tape('directory updates (strings/buffers)', function(t) {
-  t.plan(4);
-
-  you.documents = [
-    { id: 'one', data: 'uno' },
-    { id: 'two', data: Buffer('dos') },
-    { id: 'three', data: 'tres' },
-  ];
-
-  you.update(function(err) {
-    t.error(err);
-
-    var one = fs.readFileSync(__dirname + '/db/people/' + you.id + '/documents/one', 'utf8');
-    var two = fs.readFileSync(__dirname + '/db/people/' + you.id + '/documents/two', 'utf8');
-    var three = fs.readFileSync(__dirname + '/db/people/' + you.id + '/documents/three', 'utf8');
-
-    t.equal(one, 'uno');
-    t.equal(two, 'dos');
-    t.equal(three, 'tres');
-  });
-});
-
-tape('directory updates (streams)', function(t) {
-  t.plan(4);
-
-  var s1 = thru();
-  var s2 = thru();
-  var s3 = thru();
-  s1.write('eins');
-  s2.write('zwei');
-  s3.write('drei');
-
-  you.documents = [
-    { id: 'one', data: s1 },
-    { id: 'two', data: s2 },
-    { id: 'three', data: s3 },
-  ];
-
-  you.update(function(err) {
-    t.error(err);
-
-    setTimeout(function() {
-      var one = fs.readFileSync(__dirname + '/db/people/' + you.id + '/documents/one', 'utf8');
-      var two = fs.readFileSync(__dirname + '/db/people/' + you.id + '/documents/two', 'utf8');
-      var three = fs.readFileSync(__dirname + '/db/people/' + you.id + '/documents/three', 'utf8');
-      t.equal(one, 'eins');
-      t.equal(two, 'zwei');
-      t.equal(three, 'drei');
-
-    // is there a better way to know for sure when these files have been completely written?
-    }, 100);
-  });
-});
-
-tape('directory updates (bad type)', function(t) {
+tape('create model with auto generated id', function(t) {
   t.plan(1);
 
-  you.documents = [
-    { id: 'one', data: function() {} },
-    { id: 'two' },
-    { id: 'three' },
-  ];
-
-  you.update(function(err) {
-    t.ok(/"one" must be a/.test(err.message));
+  auto = fsdb({ location: 'people' });
+  auto.files['name.txt'] = { data: 'auto' };
+  auto.create(function(err) {
+    t.error(err);
   });
 });
 
-tape('directory deletes', function(t) {
-  t.plan(5);
-  
-  you.documents = [ 'one', { id: 'three' } ];
-  you.update(function(err) {
+tape('read model', function(t) {
+  t.plan(3);
+
+  you = fsdb('people/you');
+  you.read(function(err) {
     t.error(err);
-    
-    you = people({ id: you.id });
-    you.read(function(err) {
-      t.error(err);
-      t.equal(you.documents.length, 2);
-      t.equal(you.documents[0], 'one');
-      t.equal(you.documents[1], 'three');
-    });
+    t.equal(you.files['name.txt'].data, 'you');
+    t.equal(you.files['email.txt'], undefined);
   });
 });
 
-tape('destroy', function(t) {
-  t.plan(5);
+tape('update model', function(t) {
+  t.plan(3);
 
-  me.destroy(function(err) {
+  you.files['name.txt'] = { data: 'you?' };
+  you.files['email.txt'] = { data: 'you@yours.com' };
+  you.update(function(err) {
     t.error(err);
+    t.equal(you.files['name.txt'].data, 'you?');
+    t.equal(you.files['email.txt'].data, 'you@yours.com');
+  });
+});
 
-    people.ls({ order: 'sort' }, function(err, models) {
+tape('destroy model', function(t) {
+  t.plan(4);
+
+  you.destroy(function(err) {
+    t.error(err);
+    fs.readdir(root + '/people', function(err, files) {
       t.error(err);
-      t.equal(models.length, 2);
-      t.equal(models[0].name, 'you');
-      t.equal(models[1].name, 'everyone we know');
+      t.equal(files.length, 1);
+      t.equal(files[0], auto.id);
     });
   });
 });
