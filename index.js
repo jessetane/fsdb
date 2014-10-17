@@ -264,7 +264,8 @@ FSDB.prototype.read = function(opts, cb) {
             }
             db.parent = self;
             folders.push(db);
-            return db.read(diropts, cb);
+            if (!opts.shallow) return db.read(diropts, cb);
+            else return cb();
           }
           else {
             var ext = filename.replace(/[.]*[^.]+\.(.*)/, '$1');
